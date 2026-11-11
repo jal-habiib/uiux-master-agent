@@ -1,0 +1,26 @@
+# Environments
+.venv/
+env/
+ENV/
+
+# Secrets & API Keys
+.env
+.env.local
+.env.*.local
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Agent Outputs & Data
+output/
+temp_uploads/
+data/chroma_db/
+data/chat_history.json
+
+# Streamlit
+.streamlit/secrets.toml
+
+# System files
+.DS_Store
+Thumbs.db

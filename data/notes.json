@@ -1,0 +1,38 @@
+[
+  {
+    "ts": "2026-11-04T09:00:48.076713",
+    "text": "Use a warm orange palette for the SACCO app"
+  },
+  {
+    "ts": "2026-11-04T09:01:04.416414",
+    "text": "Use a warm orange palette for the SACCO app"
+  },
+  {
+    "ts": "2026-11-04T09:01:12.173743",
+    "text": "Use a warm orange palette for the SACCO app"
+  },
+  {
+    "ts": "2026-11-04T10:01:45.456426",
+    "text": "SACCO Warm Earth Palette: Surface #FFFDF8, Text #201A15, Muted #635347, CTA #B84A00 (Terracotta Amber, 5.23:1 contrast), Badge #FFF3E0 / #8C3700. Tailored for East African financial trusts with UGX pricing."
+  },
+  {
+    "ts": "2026-11-04T10:26:54.868583",
+    "text": "SACCO Pricing Card: Used warm earth/terracotta palette (#FFF9F2 bg, #2C1A11 dark text, #B84A00 primary accent, #6E5A4F muted text). All text pairings verified >= 4.5:1 contrast. Mobile-first stacked layout with prominent UGX pricing display and clear accessibility focus states."
+  },
+  {
+    "ts": "2026-11-04T10:28:22.976404",
+    "text": "SACCO pricing card designed for Ugandan context (UGX currency). Warm earth-tone palette using Terracotta (#9A3412), Deep Espresso (#1F1610), Muted Umber (#5A4A3E), and Cream/Warm White background (#FDFBF7). Fully mobile-first layout with minimum 44px touch targets."
+  },
+  {
+    "ts": "2026-11-04T10:53:40.163647",
+    "text": "SACCO Pricing Card: Warm palette (#FDFBF7 bg, #2B2118 primary text, #A53E12 terracotta accent, #6E5D4F muted text). UGX currency pricing with 3 cooperative membership tiers (Silver UGX 50k, Gold UGX 150k, Platinum UGX 500k). Mobile-first stack layout with touch targets >= 44px and WCAG AA contrast (6.37:1 ratio on primary CTA button)."
+  },
+  {
+    "ts": "2026-11-04T11:38:30.449797",
+    "text": "SACCO UGX Pricing Cards: Warm earth palette (#FAF6F0 bg, #963E13 primary terracotta CTA, #251811 dark contrast card for Most Popular tier, #E59819 gold accents). Included local UGX formatting, UMRA regulation context, dividend estimator, and MTN/Airtel MoMo payment badge integration."
+  },
+  {
+    "ts": "2026-11-04T13:08:24.930107",
+    "text": "Restaurant mobile page used warm earth palette adapted from SACCO notes: bg #FFF7F0, text #2D1B0E, accent #C2410C. Verified contrast: text-on-bg 15.54:1 (AAA), white-on-accent 5.18:1 (AA normal/large). Mobile-first stacked layout, min 44px touch targets via touch-target class, sticky bottom CTA bar for reservation, horizontal scrollable category pills, Playfair Display headings + Inter body."
+  }
+]

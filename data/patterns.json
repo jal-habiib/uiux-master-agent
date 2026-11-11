@@ -1,0 +1,32 @@
+{
+  "pricing-card": {
+    "structure": ["header", "price", "features", "cta"],
+    "layout": "vertical",
+    "container": "card",
+    "notes": "Primary CTA at bottom, feature list with checkmarks, price as focal point (largest text)."
+  },
+  "empty-state": {
+    "structure": ["icon", "heading", "body", "action"],
+    "layout": "vertical",
+    "container": "inset",
+    "notes": "Icon muted, single CTA, max 60ch body copy."
+  },
+  "onboarding-step": {
+    "structure": ["progress", "illustration", "heading", "body", "actions"],
+    "layout": "vertical",
+    "container": "full-width",
+    "notes": "Progress visible at top, one primary action, back as text-only."
+  },
+  "data-table": {
+    "structure": ["toolbar", "header-row", "rows", "pagination"],
+    "layout": "grid-3",
+    "container": "full-width",
+    "notes": "Sticky header, row hover, pagination bottom-right, empty state replaces rows."
+  },
+  "form-field": {
+    "structure": ["label", "input", "helper", "error"],
+    "layout": "vertical",
+    "container": "inset",
+    "notes": "Label above input, error replaces helper (never both), error color #DC2626."
+  }
+}

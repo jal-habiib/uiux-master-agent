@@ -1,0 +1,12 @@
+{
+  "brand_name": "Default Startup",
+  "colors": {
+    "primary": "#A53E12",
+    "background": "#FAF7F2",
+    "text": "#2B2118"
+  },
+  "fonts": {
+    "heading": "Playfair Display",
+    "body": "Inter"
+  }
+}
