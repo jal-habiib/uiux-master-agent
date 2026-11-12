@@ -1,38 +1,98 @@
+import html
+import re
+
+
+DEFAULT_PALETTE = {
+    "bg": "#FFFFFF",
+    "text": "#111111",
+    "accent": "#2563EB",
+    "muted": "#6B7280",
+}
+PALETTE_KEYS = tuple(DEFAULT_PALETTE)
+COLOR_TOKEN = re.compile(r"#[0-9A-Fa-f]{3}(?:[0-9A-Fa-f]{3})?")
+SECTIONS = {"header", "price", "features", "cta", "body"}
+
+
+def _text(value: object, default: str = "") -> str:
+    if value is None:
+        return default
+    if not isinstance(value, str):
+        raise ValueError("Component content values must be strings.")
+    return html.escape(value, quote=True)
+
+
+def _palette(spec_palette: object) -> dict[str, str]:
+    if spec_palette is None:
+        return DEFAULT_PALETTE.copy()
+    if not isinstance(spec_palette, dict):
+        raise ValueError("Palette must be an object.")
+
+    palette = DEFAULT_PALETTE.copy()
+    for key in PALETTE_KEYS:
+        value = spec_palette.get(key, palette[key])
+        if not isinstance(value, str) or not COLOR_TOKEN.fullmatch(value):
+            raise ValueError(f"Palette color '{key}' must be a 3- or 6-digit hex color.")
+        palette[key] = value
+    return palette
+
+
+def _structure(value: object) -> list[str]:
+    if value is None:
+        return ["body"]
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError("Structure must be a list of section names.")
+    return [item for item in value if item in SECTIONS]
+
+
 def render(spec: dict) -> str:
-    name = spec.get("name", "component")
-    palette = spec.get("palette", {"bg": "#FFFFFF", "text": "#111111", "accent": "#2563EB", "muted": "#6B7280"})
+    if not isinstance(spec, dict):
+        raise ValueError("Component specification must be an object.")
+
+    name = _text(spec.get("name", "component"), "component")
+    if not isinstance(spec.get("name", "component"), str):
+        raise ValueError("Component name must be a string.")
+
     content = spec.get("content", {})
     if isinstance(content, str):
         content = {"body": content}
-    structure = spec.get("structure", ["body"])
+    if not isinstance(content, dict):
+        raise ValueError("Content must be an object or string.")
 
-    style_vars = f"""
-      --bg: {palette.get('bg')};
-      --text: {palette.get('text')};
-      --accent: {palette.get('accent')};
-      --muted: {palette.get('muted')};
-    """
+    palette = _palette(spec.get("palette"))
+    structure = _structure(spec.get("structure"))
+    style_vars = "\n".join(
+        f"      --{key}: {palette[key]};" for key in PALETTE_KEYS
+    )
 
-    def section_html(section):
+    def section_html(section: str) -> str:
         if section == "header":
-            return f'<h2 class="text-xl font-semibold text-[var(--text)]">{content.get("title", name.title())}</h2>'
+            title = _text(content.get("title"), html.unescape(name).title())
+            return f'<h2 class="text-xl font-semibold text-[var(--text)]">{title}</h2>'
         if section == "price":
-            return f'<div class="text-4xl font-bold text-[var(--accent)]">{content.get("price", "UGX 0")}</div>'
+            price = _text(content.get("price"), "UGX 0")
+            return f'<div class="text-4xl font-bold text-[var(--accent)]">{price}</div>'
         if section == "features":
             items = content.get("features", ["Feature one", "Feature two", "Feature three"])
             if isinstance(items, str):
-                items = [i.strip() for i in items.split(",")]
-            return "<ul class='space-y-2 text-sm text-[var(--muted)]'>" + "".join(
-                f"<li class='flex items-start gap-2'><span class='text-[var(--accent)]'>✓</span>{i}</li>"
-                for i in items
-            ) + "</ul>"
+                items = [item.strip() for item in items.split(",")]
+            if not isinstance(items, list) or not all(isinstance(item, str) for item in items):
+                raise ValueError("Features must be a string or a list of strings.")
+            rendered_items = "".join(
+                f"<li class='flex items-start gap-2'><span class='text-[var(--accent)]'>"
+                f"✓</span>{_text(item)}</li>"
+                for item in items
+            )
+            return "<ul class='space-y-2 text-sm text-[var(--muted)]'>" + rendered_items + "</ul>"
         if section == "cta":
-            return f'<button class="w-full bg-[var(--accent)] text-white font-medium py-3 px-4 rounded-lg hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--accent)]" type="button">{content.get("cta", "Get started")}</button>'
-        if section == "body":
-            return f'<p class="text-sm text-[var(--muted)]">{content.get("body", "")}</p>'
-        return f"<!-- unknown section: {section} -->"
+            cta = _text(content.get("cta"), "Get started")
+            return (
+                '<button class="w-full bg-[var(--accent)] text-white font-medium py-3 px-4 '
+                'rounded-lg hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 '
+                f'focus:ring-[var(--accent)]" type="button">{cta}</button>'
+            )
+        return f'<p class="text-sm text-[var(--muted)]">{_text(content.get("body"))}</p>'
 
-    inner = "\n      ".join(section_html(s) for s in structure)
+    inner = "\n      ".join(section_html(section) for section in structure)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -44,7 +104,7 @@ def render(spec: dict) -> str:
 </head>
 <body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
     <div class="w-full max-w-sm p-6 rounded-2xl shadow-md space-y-4"
-         style="{style_vars.strip()} background: var(--bg); color: var(--text);">
+         style="{style_vars} background: var(--bg); color: var(--text);">
           {inner}
     </div>
 </body>
