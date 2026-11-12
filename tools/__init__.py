@@ -13,8 +13,17 @@ from .critic import critique_code
 TOOLS = {
     "analyze_image": {
         "fn": analyze_image,
-        "desc": "Describe a UI screenshot in structured detail (layout, colors, components, issues). Input: image_path.",
-        "params": {"image_path": {"type": "string", "desc": "Path to local image file"}},
+        "desc": (
+            "Describe a user-uploaded PNG or JPEG screenshot in structured detail "
+            "(layout, colors, components, issues). The file must be under temp_uploads "
+            "and no larger than 15 MB."
+        ),
+        "params": {
+            "image_path": {
+                "type": "string",
+                "desc": "User-uploaded PNG/JPEG path under temp_uploads, maximum 15 MB.",
+            }
+        },
         "required": ["image_path"],
     },
     "save_file": {
@@ -110,7 +119,10 @@ TOOLS = {
     },
     "critique_code": {
         "fn": critique_code,
-        "desc": "Evaluate an HTML file against a strict 10-point UI/UX rubric and report actionable issues.",
+        "desc": (
+            "Evaluate an HTML file with a static heuristic seven-dimension, "
+            "100-point soft-score rubric. Hard gates are not verified by this tool."
+        ),
         "params": {
             "html_path": {"type": "string", "desc": "Path to the HTML file to critique"},
         },
