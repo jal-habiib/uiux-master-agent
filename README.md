@@ -72,9 +72,20 @@ Pass a temporary `db_path` in tests; the default is `config.DATA_DIR /
 actor/reason/artifact metadata, support idempotency keys, and never deliver
 unless the gate metadata contains `gate_status="PASS"`.
 
-This slice is persistence and policy only. It does not wire the state machine
-into the current chat UI, run stage workers, edit source files, or mutate
-output artifacts.
+### S6 intake job UI
+
+The S6 vertical slice connects the Streamlit chat UI to persistent SQLite jobs.
+The sidebar supports Create and Review modes, starts new jobs, resumes saved
+`INTAKE` jobs after reload, and displays the active job's mode, state, and
+short ID. A prompt without an active job creates an `INTAKE` job before the
+existing agent flow runs, and follow-up prompts reuse that job.
+New chat messages are associated with the active job, so chat context does
+not bleed between jobs; legacy unassigned messages remain available only when
+no job is active.
+
+Only job creation, recovery, and the `CREATED -> INTAKE` transition are
+integrated. Plan, Design, Build, Verify, QA, gate/delivery, and all downstream
+workers are not connected and are not implied to have run.
 
 The agent defaults to 20 tool-loop iterations. `MAX_ITER` may lower or raise
 that value up to the hard maximum of 50; invalid values use the safe default.

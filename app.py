@@ -9,6 +9,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from agent import run
+import app_jobs
+import job_store
 
 HISTORY_PATH = Path(__file__).parent / "data" / "chat_history.json"
 
@@ -51,11 +53,71 @@ if "messages" not in st.session_state:
     load_history()
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
+if "active_job_id" not in st.session_state:
+    st.session_state.active_job_id = None
 
 st.title("UI/UX Master Agent")
 
 TEMP_UPLOADS_DIR = Path(__file__).parent / "temp_uploads"
 TEMP_UPLOADS_DIR.mkdir(exist_ok=True)
+
+selected_mode = st.sidebar.radio(
+    "Job mode",
+    options=("Create", "Review"),
+    help="Create builds a new interface; Review evaluates an existing one.",
+)
+mode = selected_mode.lower()
+
+active_job = None
+if st.session_state.active_job_id:
+    try:
+        active_job = app_jobs.resume_intake_job(st.session_state.active_job_id)
+    except job_store.JobNotFoundError:
+        st.session_state.active_job_id = None
+        st.sidebar.warning("The selected job no longer exists.")
+    except job_store.ValidationError:
+        st.session_state.active_job_id = None
+        st.sidebar.warning("The selected job is no longer available for intake.")
+
+if st.sidebar.button("Start new job", type="primary"):
+    active_job = app_jobs.start_intake_job(mode)
+    st.session_state.active_job_id = active_job["id"]
+
+recoverable_jobs = app_jobs.list_recoverable_intake_jobs()
+if recoverable_jobs:
+    jobs_by_id = {job["id"]: job for job in recoverable_jobs}
+    options = [""] + list(jobs_by_id)
+    active_id = st.session_state.active_job_id
+    selected_job_id = st.sidebar.selectbox(
+        "Resume an intake job",
+        options,
+        index=options.index(active_id) if active_id in options else 0,
+        format_func=lambda job_id: (
+            "Select a saved job..."
+            if not job_id
+            else f"{jobs_by_id[job_id]['mode'].title()} · {job_id[:8]}"
+        ),
+    )
+    if selected_job_id and selected_job_id != st.session_state.active_job_id:
+        try:
+            active_job = app_jobs.resume_intake_job(selected_job_id)
+            st.session_state.active_job_id = active_job["id"]
+        except job_store.JobNotFoundError:
+            st.sidebar.warning("That saved job no longer exists. Refresh and try again.")
+        except job_store.ValidationError:
+            st.sidebar.warning("That saved job is no longer in intake.")
+
+if active_job:
+    st.sidebar.success(
+        f"Active job: {active_job['mode'].title()} · {active_job['state']} · "
+        f"{active_job['id'][:8]}"
+    )
+else:
+    st.sidebar.info("No active job. One will be created when you submit a prompt.")
+st.sidebar.caption(
+    "S6 status: intake persistence is connected. Downstream stages and workers "
+    "are not connected yet."
+)
 
 uploaded_images = st.sidebar.file_uploader(
     "Upload an image for analysis",
@@ -64,7 +126,9 @@ uploaded_images = st.sidebar.file_uploader(
     key=st.session_state.uploader_key,
 )
 
-for message in st.session_state.messages:
+for message in app_jobs.messages_for_job(
+    st.session_state.messages, st.session_state.active_job_id
+):
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if message.get("image_paths"):
@@ -73,6 +137,10 @@ for message in st.session_state.messages:
 if prompt := st.chat_input("Ask the UI/UX Master Agent..."):
     status = None
     try:
+        if active_job is None:
+            active_job = app_jobs.start_intake_job(mode)
+            st.session_state.active_job_id = active_job["id"]
+
         image_paths = []
         for uploaded_image in uploaded_images:
             image_path = TEMP_UPLOADS_DIR / Path(uploaded_image.name).name
@@ -80,7 +148,12 @@ if prompt := st.chat_input("Ask the UI/UX Master Agent..."):
             image_paths.append(str(image_path))
 
         st.session_state.messages.append(
-            {"role": "user", "content": prompt, "image_paths": image_paths}
+            {
+                "role": "user",
+                "content": prompt,
+                "image_paths": image_paths,
+                "job_id": active_job["id"],
+            }
         )
         save_history(st.session_state.messages)
         with st.chat_message("user"):
@@ -90,6 +163,9 @@ if prompt := st.chat_input("Ask the UI/UX Master Agent..."):
 
         with st.chat_message("assistant"):
             with st.status("Thinking...", expanded=True) as status:
+                job_messages = app_jobs.messages_for_job(
+                    st.session_state.messages, active_job["id"]
+                )
                 response = run(
                     prompt,
                     image_paths=image_paths,
@@ -98,7 +174,7 @@ if prompt := st.chat_input("Ask the UI/UX Master Agent..."):
                             "role": message["role"],
                             "content": message["content"],
                         }
-                        for message in st.session_state.messages[:-1]
+                        for message in job_messages[:-1]
                     ],
                     status_callback=lambda message: status.update(
                         label=message,
@@ -134,7 +210,11 @@ if prompt := st.chat_input("Ask the UI/UX Master Agent..."):
 
         if not is_api_error:
             st.session_state.messages.append(
-                {"role": "assistant", "content": response}
+                {
+                    "role": "assistant",
+                    "content": response,
+                    "job_id": active_job["id"],
+                }
             )
             save_history(st.session_state.messages)
     except Exception as exc:
@@ -143,5 +223,8 @@ if prompt := st.chat_input("Ask the UI/UX Master Agent..."):
             status.update(label="Agent failed", state="error")
         with st.chat_message("assistant"):
             st.error(response)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        error_message = {"role": "assistant", "content": response}
+        if active_job is not None:
+            error_message["job_id"] = active_job["id"]
+        st.session_state.messages.append(error_message)
         save_history(st.session_state.messages)
