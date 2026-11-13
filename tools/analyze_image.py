@@ -3,7 +3,13 @@ from pathlib import Path
 
 from openai import OpenAI
 
-from config import API_KEY, BASE_URL, MODEL, ROOT
+import config
+from provider_gateway import call
+
+API_KEY = getattr(config, "API_KEY", None)
+BASE_URL = getattr(config, "BASE_URL", None)
+MODEL = getattr(config, "MODEL", None)
+ROOT = config.ROOT
 
 
 ALLOWED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
@@ -36,16 +42,14 @@ def _validated_image_path(image_path: str) -> Path:
 def analyze_image(image_path: str) -> dict:
     try:
         path = _validated_image_path(image_path)
+        providers = config.PROVIDERS
         mime = {
             ".png": "image/png",
             ".jpg": "image/jpeg",
             ".jpeg": "image/jpeg",
         }[path.suffix.lower()]
         image_data = base64.b64encode(path.read_bytes()).decode("ascii")
-        client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
-
-        response = client.chat.completions.create(
-            model=MODEL,
+        result = call(
             messages=[
                 {
                     "role": "user",
@@ -66,7 +70,15 @@ def analyze_image(image_path: str) -> dict:
                     ],
                 }
             ],
+            tools=[],
+            required_capabilities={"text", "vision"},
+            providers=providers,
+            client_factory=OpenAI,
         )
-        return {"analysis": response.choices[0].message.content}
+        if result.response is None:
+            return {
+                "error": "Unable to analyze image: " + "\n".join(result.failures)
+            }
+        return {"analysis": result.response.choices[0].message.content}
     except Exception as exc:
         return {"error": f"Unable to analyze image: {exc}"}

@@ -1,33 +1,17 @@
 import json
 import logging
-import time
 from collections.abc import Callable
 
-from openai import (
-    APIConnectionError,
-    APITimeoutError,
-    OpenAI,
-    RateLimitError,
-)
-
 from config import MAX_ITER, PROMPTS_DIR, PROVIDERS
+from provider_gateway import call as gateway_call
 from tools import TOOLS
 
 log = logging.getLogger("agent")
 
 SYSTEM_PROMPT = (PROMPTS_DIR / "system.md").read_text()
 
-# Seconds to wait for each provider before giving up on it.
-PROVIDER_TIMEOUTS = {"NVIDIA": 90.0}
-DEFAULT_TIMEOUT = 30.0
-
 # Tool output is cut to this many characters before going back to the model.
 MAX_TOOL_RESULT_CHARS = 8000
-
-# provider name -> unix time until which we skip it (set after a 429).
-# Module level, so it survives Streamlit reruns.
-_blocked_until: dict[str, float] = {}
-
 
 def _build_tool_decls():
     return [
@@ -51,65 +35,6 @@ def _build_tool_decls():
         }
         for name, meta in TOOLS.items()
     ]
-
-
-def _describe(error: Exception) -> str:
-    text = f"{type(error).__name__}: {error}"
-    return text if len(text) <= 300 else text[:300] + "..."
-
-
-def _is_retryable(error: Exception) -> bool:
-    """Server hiccups worth one quick retry. Timeouts are not retried."""
-    if isinstance(error, APITimeoutError):
-        return False
-    if isinstance(error, APIConnectionError):
-        return True
-    return getattr(error, "status_code", None) in (500, 502, 503, 504)
-
-
-def _call_provider(provider: dict, messages: list, tools: list):
-    """Return (response, None) on success or (None, reason) on failure."""
-    name = provider["name"]
-
-    wait = _blocked_until.get(name, 0) - time.time()
-    if wait > 0:
-        return None, f"skipped, rate limited (retry in about {int(wait)}s)"
-
-    client = OpenAI(
-        api_key=provider["api_key"],
-        base_url=provider["base_url"],
-        max_retries=0,
-        timeout=PROVIDER_TIMEOUTS.get(name, DEFAULT_TIMEOUT),
-    )
-
-    reason = "unknown error"
-    for attempt in range(2):
-        try:
-            log.info("Attempting Provider: %s (try %s)", name, attempt + 1)
-            response = client.chat.completions.create(
-                model=provider["model"],
-                messages=messages,
-                tools=tools,
-            )
-            if not response.choices:
-                raise ValueError("provider returned a response with no choices")
-            return response, None
-        except RateLimitError as error:
-            text = str(error).lower()
-            daily = "per-day" in text or "per day" in text
-            _blocked_until[name] = time.time() + (1800 if daily else 60)
-            reason = _describe(error)
-            break
-        except Exception as error:
-            reason = _describe(error)
-            if attempt == 0 and _is_retryable(error):
-                log.warning("Provider %s hiccup (%s), retrying once...", name, reason)
-                time.sleep(2)
-                continue
-            break
-
-    log.warning("Provider %s failed: %s", name, reason)
-    return None, reason
 
 
 def _assistant_message(message, call_ids: list[str]) -> dict:
@@ -192,23 +117,26 @@ def run(
     for i in range(MAX_ITER):
         log.info("--- Iteration %s ---", i + 1)
 
-        response = None
-        failures = []
-        used = None
-        for provider in PROVIDERS:
-            if status_callback:
-                status_callback(f"Asking {provider['name']}...")
-            response, reason = _call_provider(provider, messages, tools)
-            if response is not None:
-                used = provider["name"]
-                break
-            failures.append(f"- **{provider['name']}:** {reason}")
-
-        if response is None:
+        required_capabilities = {"text", "tool_calling"}
+        if image_paths:
+            required_capabilities.add("vision")
+        result = gateway_call(
+            messages,
+            tools,
+            required_capabilities,
+            providers=PROVIDERS,
+            status_callback=status_callback,
+        )
+        if result.response is None:
             return (
                 "⚠️ **Provider Error:** All configured AI providers failed.\n\n"
-                + "\n".join(failures)
+                + "\n".join(result.failures)
             )
+        response = result.response
+        used = (
+            f"{result.provider.get('name', result.provider.get('provider_id', 'provider'))}/"
+            f"{result.provider.get('model_id', result.provider.get('model'))}"
+        )
 
         choice = response.choices[0]
         message = choice.message
