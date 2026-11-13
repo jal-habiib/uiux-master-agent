@@ -17,6 +17,9 @@ output/
 temp_uploads/
 data/chroma_db/
 data/chat_history.json
+data/jobs.sqlite3
+data/jobs.sqlite3-wal
+data/jobs.sqlite3-shm
 node_modules/
 
 # Streamlit

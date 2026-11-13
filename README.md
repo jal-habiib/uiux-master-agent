@@ -61,6 +61,21 @@ set of supported provider variables is shown in `.env.example`.
 `*_TIMEOUT`, `*_PRIORITY`, and `*_ENABLED` control bounded timeout,
 deterministic order, and availability.
 
+### S5 orchestration core
+
+`orchestrator.py` provides a durable, independently testable Create/Review
+state machine backed by SQLite. Call `initialize_store()` explicitly, then use
+`create_job()`, `transition_job()`, `cancel_job()`, `record_checkpoint()`,
+`list_transitions()`, `list_checkpoints()`, and `list_recoverable_jobs()`.
+Pass a temporary `db_path` in tests; the default is `config.DATA_DIR /
+"jobs.sqlite3"`. Transitions require the current revision, preserve auditable
+actor/reason/artifact metadata, support idempotency keys, and never deliver
+unless the gate metadata contains `gate_status="PASS"`.
+
+This slice is persistence and policy only. It does not wire the state machine
+into the current chat UI, run stage workers, edit source files, or mutate
+output artifacts.
+
 The agent defaults to 20 tool-loop iterations. `MAX_ITER` may lower or raise
 that value up to the hard maximum of 50; invalid values use the safe default.
 Provider retries are separate from agent iterations: only one retry is allowed
