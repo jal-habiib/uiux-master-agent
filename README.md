@@ -28,3 +28,14 @@ An advanced, autonomous AI agent designed to act as a Senior UI/UX Designer and 
    ```bash
    git clone https://github.com/yourusername/uiux-master-agent.git
    cd uiux-master-agent
+
+2. **Install dependencies:**
+   ```powershell
+   .venv\Scripts\python.exe -m pip install -r requirements.txt
+   .venv\Scripts\python.exe -m playwright install chromium
+   npm ci
+   ```
+
+   Verified browser QA requires both the Chromium browser binary and the local
+   `node_modules/axe-core/axe.min.js` bundle. They are separate prerequisites.
+   Run the `verify_html` tool on a saved HTML file after generation.

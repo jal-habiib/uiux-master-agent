@@ -17,6 +17,7 @@ output/
 temp_uploads/
 data/chroma_db/
 data/chat_history.json
+node_modules/
 
 # Streamlit
 .streamlit/secrets.toml

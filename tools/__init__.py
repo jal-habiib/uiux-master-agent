@@ -9,6 +9,7 @@ from .read_brand import read_brand
 from .screenshot_html import screenshot_html
 from .semantic_memory import save_memory, search_memory
 from .critic import critique_code
+from .verify_html import verify_html
 
 TOOLS = {
     "analyze_image": {
@@ -127,5 +128,24 @@ TOOLS = {
             "html_path": {"type": "string", "desc": "Path to the HTML file to critique"},
         },
         "required": ["html_path"],
+    },
+    "verify_html": {
+        "fn": verify_html,
+        "desc": (
+            "Run Playwright and local axe-core hard-gate verification at 375, 768, "
+            "and 1440px, then combine the result with the static soft score. "
+            "Unavailable checks remain NOT_VERIFIED."
+        ),
+        "params": {
+            "filename": {
+                "type": "string",
+                "desc": "Safe single HTML filename in the output folder.",
+            },
+            "flows_json": {
+                "type": "string",
+                "desc": "Optional JSON specification of safe required user flows.",
+            },
+        },
+        "required": ["filename"],
     },
 }

@@ -14,7 +14,8 @@ Trigger when the user asks to build, design, generate, or modify an interface.
 4. Call `screenshot_html` to capture mobile (375px), tablet (768px), and desktop (1440px) evidence. Inspect only evidence actually returned and available, such as paths and console logs; do not claim to have visually inspected screenshot pixels unless the image content was actually made available.
 5. Call `critique_code` on the saved HTML. It is a static heuristic over the seven weighted soft-score dimensions, not a browser, runtime, axe-core, or visual verification engine.
 6. Apply useful fixes when `score_gate_passed` is false and repeat the save/edit, screenshot, and critique cycle no more than three times. The critic's `passed` field is only a compatibility alias for the soft-score threshold, never overall delivery acceptance. Keep the workflow within the 15 model/tool loop budget; skip redundant calls.
-7. Final response: name the saved filename, summarize evidence, separate the soft score from hard-gate status, and list limitations. Any hard gate not actually executed is **NOT VERIFIED**, never PASS.
+7. Call `verify_html` after saving, screenshot capture, and static critique. Treat its hard-gate report as authoritative overall QA, use `score_gate_passed` for soft-score iteration, and fix verified failures for up to three cycles. The static critic alone never certifies delivery.
+8. Final response: name the saved filename, summarize evidence, separate the soft score from hard-gate status, and list limitations. Any hard gate not actually executed is **NOT VERIFIED**, never PASS.
 
 Use suitable user-provided or safely licensed assets when available. When assets are unavailable, prefer an intentional image-free layout or CSS-native visual and disclose that limitation. Do not always use `placehold.co`, invent assets, or leave broken links.
 
