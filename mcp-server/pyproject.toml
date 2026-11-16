@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uiux-agent-mcp"
+version = "0.1.0"
+description = "Local, security-bounded MCP server for the UI/UX Master Agent repository"
+requires-python = ">=3.12"
+dependencies = ["mcp>=1.9,<2"]
+
+[project.scripts]
+uiux-agent-mcp = "uiux_agent_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
