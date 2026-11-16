@@ -120,6 +120,7 @@ def transition_job(
     metadata: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
     db_path: str | Path | None = None,
+    checkpoint: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if (
         not isinstance(expected_revision, int)
@@ -129,6 +130,26 @@ def transition_job(
         raise job_store.ValidationError("expected_revision must be a non-negative integer")
     artifacts = job_store.validate_artifact_refs(artifact_refs)
     metadata_value = job_store.validate_metadata(metadata)
+    checkpoint_value = None
+    if checkpoint is not None:
+        if not isinstance(checkpoint, dict) or set(checkpoint) != {
+            "stage", "actor", "reason"
+        }:
+            raise job_store.ValidationError(
+                "checkpoint must contain stage, actor, and reason"
+            )
+        for field in ("stage", "actor", "reason"):
+            if not isinstance(checkpoint[field], str) or not checkpoint[field].strip():
+                raise job_store.ValidationError(
+                    f"checkpoint.{field} must be a non-empty string"
+                )
+        checkpoint_value = {
+            "stage": checkpoint["stage"],
+            "actor": checkpoint["actor"],
+            "reason": checkpoint["reason"],
+            "artifact_refs": artifacts,
+            "metadata": metadata_value,
+        }
     if idempotency_key is not None:
         prior = job_store.find_idempotent_transition(job_id, idempotency_key, db_path)
         if prior is not None:
@@ -152,6 +173,14 @@ def transition_job(
         raise job_store.ValidationError(
             f"stale revision: expected {expected_revision}, current {job['revision']}"
         )
+    if checkpoint_value is not None:
+        expected_stage = (
+            job["resume_state"] if job["state"] in CONTROL_STATES else job["state"]
+        )
+        if checkpoint_value["stage"] != expected_stage:
+            raise job_store.ValidationError(
+                f"checkpoint stage must match the current stage {expected_stage!r}"
+            )
     resume_state = _validate_target(job, to_state, metadata_value)
     return job_store.apply_transition(
         job_id,
@@ -165,6 +194,7 @@ def transition_job(
         resume_state,
         idempotency_key,
         db_path,
+        checkpoint_value,
     )
 
 

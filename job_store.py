@@ -284,6 +284,7 @@ def apply_transition(
     resume_state: str | None,
     idempotency_key: str | None,
     db_path: str | Path | None = None,
+    checkpoint: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Persist a validated transition under an immediate transaction."""
     job_id = _text(job_id, "job_id")
@@ -295,6 +296,19 @@ def apply_transition(
         idempotency_key = _text(idempotency_key, "idempotency_key")
     artifact_json = _json_value(validate_artifact_refs(artifact_refs), "artifact_refs")
     metadata_json = _json_value(validate_metadata(metadata), "metadata")
+    checkpoint_values = None
+    if checkpoint is not None:
+        if not isinstance(checkpoint, dict) or set(checkpoint) != {
+            "stage", "actor", "reason", "artifact_refs", "metadata"
+        }:
+            raise ValidationError("checkpoint must contain the exact checkpoint fields")
+        checkpoint_values = (
+            _text(checkpoint["stage"], "checkpoint.stage"),
+            _text(checkpoint["actor"], "checkpoint.actor"),
+            _text(checkpoint["reason"], "checkpoint.reason"),
+            _json_value(validate_artifact_refs(checkpoint["artifact_refs"]), "checkpoint.artifact_refs"),
+            _json_value(validate_metadata(checkpoint["metadata"]), "checkpoint.metadata"),
+        )
     path = initialize_store(db_path)
     with _connection(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -345,6 +359,25 @@ def apply_transition(
             "WHERE id = ?",
             (to_state, resume_state, timestamp, job_id),
         )
+        if checkpoint_values is not None:
+            stage, checkpoint_actor, checkpoint_reason, checkpoint_artifacts, checkpoint_metadata = (
+                checkpoint_values
+            )
+            connection.execute(
+                """INSERT INTO job_checkpoints(
+                    job_id, stage, revision, timestamp, actor, reason, artifact_refs, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    job_id,
+                    stage,
+                    expected_revision,
+                    timestamp,
+                    checkpoint_actor,
+                    checkpoint_reason,
+                    checkpoint_artifacts,
+                    checkpoint_metadata,
+                ),
+            )
         row = connection.execute(
             "SELECT * FROM job_transitions WHERE id = ?", (cursor.lastrowid,)
         ).fetchone()

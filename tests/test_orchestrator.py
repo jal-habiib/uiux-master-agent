@@ -174,6 +174,98 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(recovered[0]["latest_checkpoint"]["stage"], "CREATED")
         self.assertNotEqual(recovered[0]["state"], "DELIVERED")
 
+    def test_transition_can_atomically_record_its_source_stage_checkpoint(self):
+        job = self.create()
+        self.move(job, "INTAKE")
+        self.move(job, "PLANNING")
+        current = orchestrator.get_job(job["id"], self.db_path)
+        refs = ["job_artifacts/design.json"]
+        metadata = {"schema_version": "1.0", "status": "completed"}
+
+        transition = orchestrator.transition_job(
+            job["id"],
+            "DESIGN",
+            "designer",
+            "Design artifacts saved",
+            current["revision"],
+            artifact_refs=refs,
+            metadata=metadata,
+            db_path=self.db_path,
+            checkpoint={
+                "stage": "PLANNING",
+                "actor": "designer",
+                "reason": "Save completed design artifacts",
+            },
+        )
+
+        checkpoint = orchestrator.list_checkpoints(job["id"], self.db_path)[0]
+        self.assertEqual(transition["to_state"], "DESIGN")
+        self.assertEqual(checkpoint["stage"], "PLANNING")
+        self.assertEqual(checkpoint["revision"], current["revision"])
+        self.assertEqual(checkpoint["artifact_refs"], refs)
+        self.assertEqual(checkpoint["metadata"], metadata)
+        self.assertEqual(checkpoint["timestamp"], transition["timestamp"])
+
+    def test_atomic_transition_failure_does_not_leave_a_checkpoint(self):
+        job = self.create()
+        self.move(job, "INTAKE")
+        self.move(job, "PLANNING")
+        current = orchestrator.get_job(job["id"], self.db_path)
+        connection = sqlite3.connect(self.db_path)
+        try:
+            connection.execute(
+                """CREATE TRIGGER fail_job_update BEFORE UPDATE ON jobs
+                BEGIN SELECT RAISE(ABORT, 'forced failure'); END"""
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            orchestrator.transition_job(
+                job["id"],
+                "DESIGN",
+                "designer",
+                "Design artifacts saved",
+                current["revision"],
+                db_path=self.db_path,
+                checkpoint={
+                    "stage": "PLANNING",
+                    "actor": "designer",
+                    "reason": "Save completed design artifacts",
+                },
+            )
+
+        self.assertEqual(
+            orchestrator.get_job(job["id"], self.db_path)["state"], "PLANNING"
+        )
+        self.assertEqual(orchestrator.list_checkpoints(job["id"], self.db_path), [])
+
+    def test_atomic_transition_rejects_stale_revision_without_checkpoint(self):
+        job = self.create()
+        self.move(job, "INTAKE")
+        self.move(job, "PLANNING")
+
+        with self.assertRaisesRegex(job_store.ValidationError, "stale revision"):
+            orchestrator.transition_job(
+                job["id"],
+                "DESIGN",
+                "designer",
+                "Design artifacts saved",
+                1,
+                db_path=self.db_path,
+                checkpoint={
+                    "stage": "PLANNING",
+                    "actor": "designer",
+                    "reason": "Save completed design artifacts",
+                },
+            )
+
+        self.assertEqual(
+            orchestrator.get_job(job["id"], self.db_path)["state"], "PLANNING"
+        )
+        self.assertEqual(orchestrator.list_checkpoints(job["id"], self.db_path), [])
+
     def test_checkpoints_must_match_active_or_persisted_resume_stage(self):
         job = self.create()
         with self.assertRaises(job_store.ValidationError):

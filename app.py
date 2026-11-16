@@ -10,6 +10,7 @@ import streamlit.components.v1 as components
 
 from agent import run
 import app_jobs
+import design
 import job_store
 import planning
 
@@ -116,8 +117,8 @@ if active_job:
 else:
     st.sidebar.info("No active job. One will be created when you submit a prompt.")
 st.sidebar.caption(
-    "S7 status: Create intake and UX planning are connected. Design, Build, "
-    "Verify, and delivery workers are not connected yet."
+    "S8 status: Create intake, UX planning, and Design are connected. "
+    "Build, Verify, and delivery workers are not connected yet."
 )
 
 uploaded_images = st.sidebar.file_uploader(
@@ -135,7 +136,7 @@ for message in app_jobs.messages_for_job(
         if message.get("image_paths"):
             st.image(message["image_paths"])
 
-if active_job and active_job["state"] == "PLANNING" and active_job["mode"] == "create":
+if active_job and active_job["mode"] == "create":
     saved = app_jobs.saved_planning_artifacts(active_job)
     if saved:
         brief = saved.get("product_brief.json", {})
@@ -148,7 +149,81 @@ if active_job and active_job["state"] == "PLANNING" and active_job["mode"] == "c
         if plan:
             with st.expander("UX plan JSON"):
                 st.json(plan)
-        st.info("Job is in PLANNING. Design is not connected yet; start a new job for another brief.")
+    if active_job["state"] == "PLANNING" and saved and saved.get("ux_plan.json"):
+        st.info("The validated S7 plan is ready for Design.")
+        questions = app_jobs.saved_design_clarification_questions(active_job)
+        if questions:
+            st.warning("Design needs clarification before it can be completed.")
+            for question in questions:
+                st.markdown(f"- {question}")
+            clarification = st.text_area(
+                "Your clarification",
+                key=f"design_clarification_{active_job['id']}",
+                max_chars=design.MAX_STRING_CHARS,
+            )
+        else:
+            clarification = None
+
+        if st.button(
+            "Generate design specification",
+            key=f"generate_design_{active_job['id']}",
+            type="primary",
+        ):
+            if questions and not (clarification or "").strip():
+                st.error("Answer the saved Design questions before continuing.")
+            else:
+                design_saved = False
+                try:
+                    with st.status("Generating design specification...", expanded=True) as status:
+                        design.design_job(
+                            active_job["id"],
+                            clarification=clarification,
+                        )
+                        status.update(label="Design stage saved", state="complete")
+                    design_saved = True
+                except Exception as exc:
+                    st.error(f"Unable to generate the design specification: {exc}")
+                if design_saved:
+                    st.rerun()
+
+    if active_job["state"] == "DESIGN":
+        saved_design = app_jobs.saved_design_artifacts(active_job)
+        if not saved_design or set(saved_design) != app_jobs.DESIGN_ARTIFACT_NAMES:
+            st.error("The completed Design artifacts are missing or invalid.")
+        else:
+            spec = saved_design["design_spec.json"]
+            tokens = saved_design["design_tokens.json"]
+            st.subheader("Design specification")
+            st.write(spec["design_direction"])
+            st.markdown("**Page specifications**")
+            for page in spec["page_specs"]:
+                with st.expander(page["page"]):
+                    st.write(page["purpose"])
+                    st.write(page["layout"])
+                    st.markdown("**Sections**")
+                    st.write(page["sections"])
+                    st.markdown(f"**Primary action:** {page['primary_action']}")
+                    st.markdown(f"**Responsive behavior:** {page['responsive_behavior']}")
+            st.markdown("**Component specifications**")
+            st.json(spec["component_specs"])
+            st.markdown("**Interaction specifications**")
+            st.json(spec["interaction_specs"])
+            st.markdown("**Accessibility guidance**")
+            st.write(spec["accessibility_checks"])
+            st.markdown("**Responsive guidance**")
+            st.write(spec["responsive_rules"])
+            with st.expander("Content and implementation guidance"):
+                st.write(spec["content_guidance"])
+                st.write(spec["implementation_constraints"])
+            with st.expander("Design tokens"):
+                st.json(tokens)
+            st.caption(
+                "Saved design artifacts: "
+                + ", ".join(
+                    reference
+                    for reference in active_job["latest_checkpoint"]["artifact_refs"]
+                )
+            )
 
 if prompt := st.chat_input("Ask the UI/UX Master Agent..."):
     status = None
@@ -196,8 +271,7 @@ if prompt := st.chat_input("Ask the UI/UX Master Agent..."):
                         )
                     else:
                         response = (
-                            "Product brief and UX plan saved. The job is now **PLANNING**; "
-                            "Design is not connected yet.\n\n"
+                            "Product brief and UX plan saved. The job is now **PLANNING**.\n\n"
                             f"**Summary:** {result['ux_plan']['summary']}"
                         )
                     active_job = result["job"]
