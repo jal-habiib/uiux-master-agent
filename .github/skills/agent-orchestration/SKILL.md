@@ -18,6 +18,15 @@ Specialist roles are modules within stages by default. Do not create separate ag
 - Validate contract versions and required fields at boundaries.
 - QA may produce findings and fix tasks. It must not silently mutate source files.
 
+S7 Create intake contracts use schema version `1.0`: a Product Brief contains
+the product problem, users, goals, features, flows, constraints, assumptions,
+open questions, metrics, acceptance criteria, platform, and `HTML + Tailwind`
+output target. A UX Plan contains information architecture, journeys,
+interaction inventory, content, accessibility, responsive requirements, risks,
+and decisions. A `needs_input` result persists only the draft brief and
+questions in `INTAKE`; a complete result persists both artifacts and advances
+to `PLANNING`.
+
 Expected Create artifacts include product_brief.json, ux_plan.json, design_brief.md, design_tokens.json, component_spec.json (recommended), source revision/diff, screenshots when rendering succeeds, qa_report.json, and delivery_report.md.
 
 ## Job state

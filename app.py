@@ -11,6 +11,7 @@ import streamlit.components.v1 as components
 from agent import run
 import app_jobs
 import job_store
+import planning
 
 HISTORY_PATH = Path(__file__).parent / "data" / "chat_history.json"
 
@@ -71,25 +72,25 @@ mode = selected_mode.lower()
 active_job = None
 if st.session_state.active_job_id:
     try:
-        active_job = app_jobs.resume_intake_job(st.session_state.active_job_id)
+        active_job = app_jobs.resume_ui_job(st.session_state.active_job_id)
     except job_store.JobNotFoundError:
         st.session_state.active_job_id = None
         st.sidebar.warning("The selected job no longer exists.")
     except job_store.ValidationError:
         st.session_state.active_job_id = None
-        st.sidebar.warning("The selected job is no longer available for intake.")
+        st.sidebar.warning("The selected job is no longer available.")
 
 if st.sidebar.button("Start new job", type="primary"):
     active_job = app_jobs.start_intake_job(mode)
     st.session_state.active_job_id = active_job["id"]
 
-recoverable_jobs = app_jobs.list_recoverable_intake_jobs()
+recoverable_jobs = app_jobs.list_recoverable_ui_jobs()
 if recoverable_jobs:
     jobs_by_id = {job["id"]: job for job in recoverable_jobs}
     options = [""] + list(jobs_by_id)
     active_id = st.session_state.active_job_id
     selected_job_id = st.sidebar.selectbox(
-        "Resume an intake job",
+        "Resume a saved job",
         options,
         index=options.index(active_id) if active_id in options else 0,
         format_func=lambda job_id: (
@@ -100,12 +101,12 @@ if recoverable_jobs:
     )
     if selected_job_id and selected_job_id != st.session_state.active_job_id:
         try:
-            active_job = app_jobs.resume_intake_job(selected_job_id)
+            active_job = app_jobs.resume_ui_job(selected_job_id)
             st.session_state.active_job_id = active_job["id"]
         except job_store.JobNotFoundError:
             st.sidebar.warning("That saved job no longer exists. Refresh and try again.")
         except job_store.ValidationError:
-            st.sidebar.warning("That saved job is no longer in intake.")
+            st.sidebar.warning("That saved job is no longer available.")
 
 if active_job:
     st.sidebar.success(
@@ -115,8 +116,8 @@ if active_job:
 else:
     st.sidebar.info("No active job. One will be created when you submit a prompt.")
 st.sidebar.caption(
-    "S6 status: intake persistence is connected. Downstream stages and workers "
-    "are not connected yet."
+    "S7 status: Create intake and UX planning are connected. Design, Build, "
+    "Verify, and delivery workers are not connected yet."
 )
 
 uploaded_images = st.sidebar.file_uploader(
@@ -134,12 +135,30 @@ for message in app_jobs.messages_for_job(
         if message.get("image_paths"):
             st.image(message["image_paths"])
 
+if active_job and active_job["state"] == "PLANNING" and active_job["mode"] == "create":
+    saved = app_jobs.saved_planning_artifacts(active_job)
+    if saved:
+        brief = saved.get("product_brief.json", {})
+        plan = saved.get("ux_plan.json")
+        st.subheader("Saved UX plan")
+        st.write(plan.get("summary", "Validated UX plan saved.") if plan else
+                 "Clarification is still required before a UX plan can be saved.")
+        with st.expander("Product brief JSON"):
+            st.json(brief)
+        if plan:
+            with st.expander("UX plan JSON"):
+                st.json(plan)
+        st.info("Job is in PLANNING. Design is not connected yet; start a new job for another brief.")
+
 if prompt := st.chat_input("Ask the UI/UX Master Agent..."):
     status = None
     try:
         if active_job is None:
             active_job = app_jobs.start_intake_job(mode)
             st.session_state.active_job_id = active_job["id"]
+        if active_job["mode"] == "create" and active_job["state"] != "INTAKE":
+            st.error("This Create job already has a saved plan. Start a new job to submit another brief.")
+            st.stop()
 
         image_paths = []
         for uploaded_image in uploaded_images:
@@ -166,21 +185,38 @@ if prompt := st.chat_input("Ask the UI/UX Master Agent..."):
                 job_messages = app_jobs.messages_for_job(
                     st.session_state.messages, active_job["id"]
                 )
-                response = run(
-                    prompt,
-                    image_paths=image_paths,
-                    history=[
-                        {
-                            "role": message["role"],
-                            "content": message["content"],
-                        }
-                        for message in job_messages[:-1]
-                    ],
-                    status_callback=lambda message: status.update(
-                        label=message,
-                        state="running",
-                    ),
-                )
+                if active_job["mode"] == "create":
+                    result = planning.plan_job(
+                        active_job["id"],
+                        job_messages,
+                    )
+                    if result["status"] == "needs_input":
+                        response = "I need a little more information before planning:\n\n" + "\n".join(
+                            f"- {question}" for question in result["clarification_questions"]
+                        )
+                    else:
+                        response = (
+                            "Product brief and UX plan saved. The job is now **PLANNING**; "
+                            "Design is not connected yet.\n\n"
+                            f"**Summary:** {result['ux_plan']['summary']}"
+                        )
+                    active_job = result["job"]
+                else:
+                    response = run(
+                        prompt,
+                        image_paths=image_paths,
+                        history=[
+                            {
+                                "role": message["role"],
+                                "content": message["content"],
+                            }
+                            for message in job_messages[:-1]
+                        ],
+                        status_callback=lambda message: status.update(
+                            label=message,
+                            state="running",
+                        ),
+                    )
                 status.update(label="Done", state="complete")
                 st.session_state.uploader_key += 1
             is_api_error = response.startswith(

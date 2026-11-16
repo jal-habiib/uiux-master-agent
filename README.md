@@ -84,8 +84,13 @@ not bleed between jobs; legacy unassigned messages remain available only when
 no job is active.
 
 Only job creation, recovery, and the `CREATED -> INTAKE` transition are
-integrated. Plan, Design, Build, Verify, QA, gate/delivery, and all downstream
-workers are not connected and are not implied to have run.
+integrated for Review jobs. Create jobs now run the S7 Product Brief + UX Plan
+stage: user brief and follow-up messages are validated into versioned
+`product_brief.json` and `ux_plan.json` artifacts under
+`data/job_artifacts/<job-id>/<run-id>/`. Material gaps are returned as
+clarification questions and keep the job in `INTAKE`; a complete validated
+plan advances it to `PLANNING`. Design, Build, Verify, gate/delivery, and all
+downstream workers remain unconnected and are not implied to have run.
 
 The agent defaults to 20 tool-loop iterations. `MAX_ITER` may lower or raise
 that value up to the hard maximum of 50; invalid values use the safe default.

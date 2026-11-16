@@ -73,6 +73,7 @@ def call(
     client_factory: Callable[..., Any] = OpenAI,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.time,
+    response_format: dict | None = None,
 ) -> GatewayResult:
     configured = config.PROVIDERS if providers is None else providers
     eligible = eligible_providers(configured, required_capabilities)
@@ -121,9 +122,10 @@ def call(
             attempts += 1
             try:
                 log.info("Attempting provider %s (try %s)", identity, attempt + 1)
-                response = client.chat.completions.create(
-                    model=model_id, messages=messages, tools=tools
-                )
+                request = {"model": model_id, "messages": messages, "tools": tools}
+                if response_format is not None:
+                    request["response_format"] = response_format
+                response = client.chat.completions.create(**request)
                 if not response.choices:
                     raise ValueError("provider returned a response with no choices")
                 return GatewayResult(response, provider, failures, attempts)

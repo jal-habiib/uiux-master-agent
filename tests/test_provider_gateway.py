@@ -60,6 +60,29 @@ class ProviderGatewayTests(unittest.TestCase):
             [],
         )
 
+    def test_omitted_response_format_preserves_legacy_request_shape(self):
+        client = Mock()
+        client.chat.completions.create.return_value = Mock(choices=[Mock()])
+
+        result = call(
+            [{"role": "user", "content": "hello"}],
+            [],
+            {"text"},
+            [provider("text-only", {"text"})],
+            client_factory=lambda **_: client,
+        )
+
+        self.assertIsNotNone(result.response)
+        request = client.chat.completions.create.call_args.kwargs
+        self.assertEqual(
+            request,
+            {
+                "model": "text-only-model",
+                "messages": [{"role": "user", "content": "hello"}],
+                "tools": [],
+            },
+        )
+
     def test_only_separators_are_reported_as_malformed_capabilities(self):
         capabilities, diagnostic = config._parse_capabilities(",,")
         self.assertEqual(capabilities, frozenset())
