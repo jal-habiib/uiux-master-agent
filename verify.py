@@ -323,19 +323,22 @@ def load_verify_inputs(
     job = orchestrator.get_job(normalized_id, db_path)
     if job["mode"] != "create":
         raise VerifyError("Verify is available only for Create jobs")
-    if job["state"] != "BUILD":
-        raise VerifyError("Verify requires an active Create job in BUILD")
+    if job["state"] not in {"BUILD", "VERIFY"}:
+        raise VerifyError("Verify requires an active Create job in BUILD or VERIFY")
     checkpoints = orchestrator.list_checkpoints(normalized_id, db_path)
     build_checkpoint = next(
         (
             item for item in reversed(checkpoints)
-            if item.get("metadata", {}).get("integration") == app_jobs.BUILD_INTEGRATION
+            if item.get("metadata", {}).get("integration") in {
+                app_jobs.BUILD_INTEGRATION, app_jobs.REFINE_INTEGRATION
+            }
+            and item.get("metadata", {}).get("status") == "completed"
         ),
         None,
     )
     if (
         not build_checkpoint
-        or build_checkpoint.get("stage") != "DESIGN"
+        or build_checkpoint.get("stage") not in {"DESIGN", "REFINE"}
         or build_checkpoint.get("metadata", {}).get("status") != "completed"
     ):
         raise VerifyError("Verify requires the active job's completed S9 Build checkpoint")
@@ -879,7 +882,7 @@ def verify_job(
     provider_call_fn: Callable[..., Any] | None = None,
     providers: list[dict] | None = None,
 ) -> dict[str, Any]:
-    """Verify the active S9 Build, persisting evidence before its atomic transition."""
+    """Verify the latest immutable Build/Refine run and persist its evidence."""
     inputs = load_verify_inputs(job_id, db_path, artifact_root)
     report = _evaluate(inputs, flows_json, browser_qa_fn, provider_call_fn, providers)
     root = Path(artifact_root) if artifact_root is not None else config.DATA_DIR
@@ -902,12 +905,12 @@ def verify_job(
         ),
     }
     try:
-        if report["status"] == "NEEDS_INPUT":
+        if report["status"] == "NEEDS_INPUT" or inputs["job"]["state"] == "VERIFY":
             orchestrator.record_checkpoint(
                 inputs["job"]["id"],
-                "BUILD",
+                inputs["job"]["state"],
                 VERIFY_ACTOR,
-                "Verify requires additional evidence",
+                "Verify evidence saved for the latest immutable Build run",
                 refs,
                 metadata,
                 expected_revision=inputs["job"]["revision"],
@@ -949,8 +952,8 @@ def load_saved_verification(
     job: dict[str, Any], artifact_root: str | Path | None = None
 ) -> dict[str, Any] | None:
     """Load the active job's immutable Verify report without rerunning checks."""
-    if job.get("mode") != "create" or job.get("state") not in {"BUILD", "VERIFY"}:
-        raise VerifyError("saved Verify output requires a Create job in BUILD or VERIFY")
+    if job.get("mode") != "create" or job.get("state") not in {"BUILD", "VERIFY", "REFINE"}:
+        raise VerifyError("saved Verify output requires a Create job in BUILD, VERIFY, or REFINE")
     values = app_jobs.saved_verify_artifacts(job, artifact_root)
     if values is None:
         return None

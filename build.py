@@ -817,8 +817,8 @@ def load_completed_build(
     job: dict[str, Any], artifact_root: str | Path | None = None
 ) -> dict[str, Any] | None:
     """Reload and revalidate a saved Build without invoking a provider."""
-    if job.get("mode") != "create" or job.get("state") != "BUILD":
-        raise BuildError("saved Build output requires a Create job in BUILD")
+    if job.get("mode") != "create" or job.get("state") not in {"BUILD", "VERIFY", "REFINE"}:
+        raise BuildError("saved Build output requires a Create job in BUILD, VERIFY, or REFINE")
     values = app_jobs.saved_build_artifacts(job, artifact_root)
     if values is None:
         return None

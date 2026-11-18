@@ -99,7 +99,13 @@ immutable local ZIP delivery package with source files, HTML pages, QA report,
 checksums, and a delivery note. Incomplete evidence or failed quality checks
 block delivery; after three recorded Refine -> Verify cycles, a failed build
 may be packaged only with an explicit `NOT_PASSED` status. No deployment or
-external publishing is performed. Refine remains a bounded manual handoff.
+external publishing is performed.
+
+S12 Refine is an evidence-driven automated repair loop. It consumes a failed,
+saved Verify report; generates a new immutable HTML run; and returns the job to
+Verify. A repair is never considered successful until the new run is re-verified.
+Provider failures leave the job recoverable in `REFINE`. Gate rejects stale Verify
+reports that do not cover the latest immutable Build or Refine run.
 
 The agent defaults to 20 tool-loop iterations. `MAX_ITER` may lower or raise
 that value up to the hard maximum of 50; invalid values use the safe default.

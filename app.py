@@ -15,6 +15,8 @@ import design
 import gate
 import job_store
 import planning
+import refine
+import orchestrator
 import verify
 
 HISTORY_PATH = Path(__file__).parent / "data" / "chat_history.json"
@@ -270,7 +272,7 @@ if active_job and active_job["mode"] == "create":
                     if build_saved:
                         st.rerun()
 
-    if active_job["state"] == "BUILD":
+    if active_job["state"] in {"BUILD", "VERIFY", "REFINE"}:
         try:
             saved_build = build.load_completed_build(active_job)
         except job_store.ValidationError as exc:
@@ -292,7 +294,7 @@ if active_job and active_job["mode"] == "create":
             with st.expander("Build manifest"):
                 st.json(manifest)
 
-    if active_job["state"] in {"BUILD", "VERIFY"}:
+    if active_job["state"] in {"BUILD", "VERIFY", "REFINE"}:
         try:
             saved_verification = verify.load_saved_verification(active_job)
         except job_store.ValidationError as exc:
@@ -349,6 +351,63 @@ if active_job and active_job["mode"] == "create":
                 st.rerun()
             except job_store.ValidationError as exc:
                 st.error(f"Unable to verify this Build: {exc}")
+
+if active_job and active_job["mode"] == "create" and active_job["state"] == "REFINE":
+    st.subheader("S12 ? Automated Refine")
+    st.info("Refine uses the saved failed Verify report to generate a new immutable HTML run. It does not assume the repair passed; the new run must be verified again.")
+    refine_feedback = st.text_area(
+        "Optional refinement guidance",
+        key=f"refine_feedback_{active_job['id']}",
+        max_chars=build.MAX_STRING_CHARS,
+        help="Describe a desired correction. Verify findings remain the primary repair evidence.",
+    )
+    if st.button("Run automated refinement", key=f"run_refine_{active_job['id']}", type="primary"):
+        try:
+            with st.status("Refining the saved HTML using Verify findings...", expanded=True) as status:
+                refined = refine.refine_job(active_job["id"], user_feedback=refine_feedback or None)
+                status.update(label="New immutable HTML run saved; ready for Verify", state="complete")
+            st.success(f"Refinement run {refined['run_id']} saved. Verify it before delivery.")
+            st.rerun()
+        except job_store.ValidationError as exc:
+            st.error(f"Automated refinement could not complete: {exc}")
+
+if active_job and active_job["mode"] == "create" and active_job["state"] == "VERIFY":
+    checkpoints = orchestrator.list_checkpoints(active_job["id"])
+    latest_build_checkpoint = next((item for item in reversed(checkpoints)
+        if item.get("metadata", {}).get("integration") in {app_jobs.BUILD_INTEGRATION, app_jobs.REFINE_INTEGRATION}
+        and item.get("metadata", {}).get("status") == "completed"), None)
+    latest_verify_checkpoint = next((item for item in reversed(checkpoints)
+        if item.get("metadata", {}).get("integration") == verify.VERIFY_INTEGRATION), None)
+    needs_reverify = bool(
+        latest_build_checkpoint and latest_verify_checkpoint
+        and latest_build_checkpoint.get("artifact_refs") != latest_verify_checkpoint.get("metadata", {}).get("source_artifact_refs")
+    ) or bool(saved_verification and saved_verification.get("status") == "NEEDS_INPUT")
+    if needs_reverify:
+        st.warning("A new refined HTML run is saved. The previous Verify report is now stale; rerun Verify before Gate & Deliver.")
+        refined_flows = st.text_area(
+            "Required browser user flows (JSON) for refined build",
+            key=f"reverify_flows_{active_job['id']}",
+            max_chars=64 * 1024,
+        )
+        if st.button("Re-verify refined HTML", key=f"reverify_build_{active_job['id']}", type="primary"):
+            try:
+                with st.status("Re-verifying refined HTML...", expanded=True) as status:
+                    result = verify.verify_job(active_job["id"], flows_json=refined_flows or None)
+                    status.update(label=f"Verify status: {result['report']['status']}", state="complete")
+                st.rerun()
+            except job_store.ValidationError as exc:
+                st.error(f"Unable to re-verify refined HTML: {exc}")
+    elif saved_verification and saved_verification.get("status") == "FAIL":
+        st.warning("The latest Verify run found repairable failures. Refine will use its saved evidence to create a new immutable run.")
+        if st.button("Refine failed HTML build", key=f"refine_failed_{active_job['id']}", type="primary"):
+            try:
+                with st.status("Refining from saved Verify findings...", expanded=True) as status:
+                    result = refine.refine_job(active_job["id"])
+                    status.update(label="Refinement run saved; re-verification required", state="complete")
+                st.success(f"Refinement run {result['run_id']} saved.")
+                st.rerun()
+            except job_store.ValidationError as exc:
+                st.error(f"Unable to refine failed HTML: {exc}")
 
 if active_job and active_job["mode"] == "create" and active_job["state"] in {"VERIFY", "GATE_AND_DELIVER", "DELIVERED"}:
     try:

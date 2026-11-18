@@ -93,6 +93,18 @@ def _load_inputs(job_id: str, db_path: str | Path | None, artifact_root: str | P
     digests = report["source_sha256"]
     if not isinstance(refs, list) or not refs or len(refs) > 21 or set(refs) != set(digests):
         raise GateError("Verify source references are malformed")
+    latest_build = next((item for item in reversed(checkpoints)
+        if item.get("metadata", {}).get("integration") in {
+            app_jobs.BUILD_INTEGRATION, app_jobs.REFINE_INTEGRATION
+        }
+        and item.get("metadata", {}).get("status") == "completed"), None)
+    if (
+        latest_build is None
+        or not isinstance(latest_build.get("artifact_refs"), list)
+        or set(latest_build["artifact_refs"]) != set(refs)
+        or latest_build.get("metadata", {}).get("artifact_refs") != latest_build.get("artifact_refs")
+    ):
+        raise GateError("Verify report is stale; it does not cover the latest immutable Build/Refine run")
     source_bytes: dict[str, bytes] = {}
     for ref in refs:
         raw = _read_ref(ref, normalized, root)

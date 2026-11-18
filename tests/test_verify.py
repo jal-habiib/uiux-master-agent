@@ -460,12 +460,15 @@ class VerifyTests(unittest.TestCase):
         review_job = orchestrator.get_job(review_job["id"], self.db_path)
         with self.assertRaisesRegex(verify.VerifyError, "Create"):
             verify.load_verify_inputs(review_job["id"], self.db_path, self.data_root)
-        final = orchestrator.get_job(self.job["id"], self.db_path)
+        final = self._verify(
+            flows_json=_flows(), provider_call_fn=self._provider(),
+            providers=self._eligible_provider(),
+        )["job"]
         orchestrator.transition_job(
-            final["id"], "VERIFY", "test", "wrong state", final["revision"],
+            final["id"], "REFINE", "test", "wrong state", final["revision"],
             db_path=self.db_path,
         )
-        with self.assertRaisesRegex(verify.VerifyError, "BUILD"):
+        with self.assertRaisesRegex(verify.VerifyError, "BUILD or VERIFY"):
             verify.load_verify_inputs(self.job["id"], self.db_path, self.data_root)
 
     def test_rejects_manifest_mismatch_and_cross_job_substitution(self):

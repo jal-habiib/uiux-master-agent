@@ -21,6 +21,7 @@ PLANNING_ARTIFACT_NAMES = frozenset({"product_brief.json", "ux_plan.json"})
 DESIGN_ARTIFACT_NAMES = frozenset({"design_spec.json", "design_tokens.json"})
 BUILD_MANIFEST_NAME = "build_manifest.json"
 BUILD_INTEGRATION = "s9-build"
+REFINE_INTEGRATION = "s12-refine"
 VERIFY_REPORT_NAME = "verify_report.json"
 VERIFY_INTEGRATION = "s10-verify"
 MAX_BUILD_PAGE_BYTES = 256 * 1024
@@ -86,7 +87,7 @@ def list_recoverable_ui_jobs(
     return [
         job
         for job in orchestrator.list_recoverable_jobs(db_path)
-        if job["state"] in {"INTAKE", "PLANNING", "DESIGN", "BUILD", "VERIFY", "GATE_AND_DELIVER"}
+        if job["state"] in {"INTAKE", "PLANNING", "DESIGN", "BUILD", "VERIFY", "REFINE", "GATE_AND_DELIVER"}
     ]
 
 
@@ -111,7 +112,7 @@ def resume_ui_job(
     if not _db_path(db_path).exists():
         raise job_store.JobNotFoundError(f"job {job_id!r} was not found")
     job = orchestrator.get_job(job_id, db_path)
-    if job["state"] not in {"INTAKE", "PLANNING", "DESIGN", "BUILD", "VERIFY", "GATE_AND_DELIVER", "DELIVERED"}:
+    if job["state"] not in {"INTAKE", "PLANNING", "DESIGN", "BUILD", "VERIFY", "REFINE", "GATE_AND_DELIVER", "DELIVERED"}:
         raise job_store.ValidationError(
             f"job {job_id!r} cannot resume from state {job['state']!r}; "
             "expected an enabled Create stage or DELIVERED"
@@ -358,14 +359,14 @@ def saved_build_artifacts(
     job: dict[str, Any], artifact_root: str | Path | None = None
 ) -> dict[str, Any] | None:
     """Load a completed Build manifest and pages only from this job's checkpoint."""
-    if job.get("mode") != "create" or job.get("state") != "BUILD":
-        raise job_store.ValidationError("saved Build artifacts require a Create job in BUILD")
+    if job.get("mode") != "create" or job.get("state") not in {"BUILD", "VERIFY", "REFINE"}:
+        raise job_store.ValidationError("saved Build artifacts require a Create job in BUILD, VERIFY, or REFINE")
     checkpoint = next(
         (
             item for item in reversed(_checkpoint_history(job))
-            if item.get("stage") == "DESIGN"
-            and item.get("metadata", {}).get("integration") == BUILD_INTEGRATION
+            if item.get("metadata", {}).get("integration") in {BUILD_INTEGRATION, REFINE_INTEGRATION}
             and item.get("metadata", {}).get("status") == "completed"
+            and item.get("stage") in {"DESIGN", "REFINE"}
         ),
         None,
     )
