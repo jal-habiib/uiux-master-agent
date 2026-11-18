@@ -84,13 +84,22 @@ not bleed between jobs; legacy unassigned messages remain available only when
 no job is active.
 
 Only job creation, recovery, and the `CREATED -> INTAKE` transition are
-integrated for Review jobs. Create jobs now run the S7 Product Brief + UX Plan
-stage: user brief and follow-up messages are validated into versioned
-`product_brief.json` and `ux_plan.json` artifacts under
-`data/job_artifacts/<job-id>/<run-id>/`. Material gaps are returned as
-clarification questions and keep the job in `INTAKE`; a complete validated
-plan advances it to `PLANNING`. Design, Build, Verify, gate/delivery, and all
-downstream workers remain unconnected and are not implied to have run.
+integrated for Review jobs. Create jobs run S7 Product Brief + UX Plan, S8
+Design, S9 Build, and S10 Verify as separate, job-scoped stages. Stage
+artifacts are immutable under `data/job_artifacts/<job-id>/<run-id>/`.
+Clarification results do not advance state. S10 checks the saved S9 manifest
+and pages, records deterministic static evidence, and uses the existing
+Playwright/axe-core QA only when available. Missing browser, axe, or required
+user-flow evidence is `NOT_VERIFIED`/`NEEDS_INPUT`, never a pass. Failed hard
+gates are `FAIL` and are never reported as verified.
+
+S11 Gate & Deliver evaluates only the saved Verify report and rechecks the
+integrity of the exact job-scoped source artifacts. Passing jobs receive an
+immutable local ZIP delivery package with source files, HTML pages, QA report,
+checksums, and a delivery note. Incomplete evidence or failed quality checks
+block delivery; after three recorded Refine -> Verify cycles, a failed build
+may be packaged only with an explicit `NOT_PASSED` status. No deployment or
+external publishing is performed. Refine remains a bounded manual handoff.
 
 The agent defaults to 20 tool-loop iterations. `MAX_ITER` may lower or raise
 that value up to the hard maximum of 50; invalid values use the safe default.

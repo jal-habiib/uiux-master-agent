@@ -79,6 +79,12 @@ class PlanningTests(unittest.TestCase):
             choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(envelope)))]
         )
 
+    @staticmethod
+    def response_from_payload(payload):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))]
+        )
+
     def fake_gateway(self, response, calls):
         def call(*args, **kwargs):
             calls.append((args, kwargs))
@@ -184,6 +190,45 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual(
             orchestrator.get_job(self.job["id"], self.db_path)["state"], "INTAKE"
         )
+
+    def test_screenshot_response_contract_mismatch_is_rejected_without_saving(self):
+        payload = {
+            "schema_version": "1.0",
+            "product_brief": _brief(),
+            "ux_plan": _plan(),
+            "next_steps": [],
+            "readiness": "ready",
+            "stage": "INTAKE",
+        }
+        calls = []
+
+        with self.assertRaisesRegex(
+            planning.PlanningError,
+            r"missing clarification_questions, status; unknown next_steps, readiness, stage",
+        ):
+            planning.plan_job(
+                self.job["id"],
+                [{"role": "user", "content": "Build a shop", "job_id": self.job["id"]}],
+                self.db_path,
+                self.artifact_root,
+                self.fake_gateway(
+                    self.response_from_payload(payload),
+                    calls,
+                ),
+            )
+
+        self.assertEqual(len(calls), 1)
+        messages, tools, capabilities = calls[0][0][:3]
+        self.assertEqual(tools, [])
+        self.assertEqual(capabilities, {"text", "json_output"})
+        self.assertEqual(calls[0][1]["response_format"], {"type": "json_object"})
+        self.assertEqual(orchestrator.get_job(self.job["id"], self.db_path)["state"], "INTAKE")
+        self.assertEqual(orchestrator.list_checkpoints(self.job["id"], self.db_path), [])
+        self.assertEqual(list(self.artifact_root.rglob("*.json")), [])
+        self.assertIn('"clarification_questions"', messages[0]["content"])
+        self.assertIn('"status"', messages[0]["content"])
+        self.assertIn('"product_brief"', messages[0]["content"])
+        self.assertIn('"ux_plan"', messages[0]["content"])
 
     def test_envelope_rejects_schema_and_shape_contract_violations(self):
         valid = {

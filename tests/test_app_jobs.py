@@ -294,6 +294,35 @@ class AppJobsTests(unittest.TestCase):
             agent_run.assert_not_called()
             plan_job.assert_not_called()
 
+    def test_create_planning_contract_error_explains_same_job_recovery(self):
+        script = self._app_script(self.root)
+        isolated_data = self.root / "isolated-data"
+        db_path = isolated_data / "jobs.sqlite3"
+        with patch.object(config, "DATA_DIR", isolated_data):
+            job = app_jobs.start_intake_job("create")
+            app = self._run_app(AppTest.from_file(str(script)))
+            app.session_state["active_job_id"] = job["id"]
+            app = self._run_app(app)
+
+            with patch(
+                "planning.plan_job",
+                side_effect=planning.PlanningResponseError(
+                    "model response has invalid fields "
+                    "(missing clarification_questions, status; "
+                    "unknown next_steps, readiness, stage)"
+                ),
+            ):
+                app.chat_input[0].set_value("Build a shop")
+                app = self._run_app(app)
+
+        errors = "\n".join(item.value for item in app.error)
+        self.assertIn("required S7 JSON contract", errors)
+        self.assertIn("No plan artifacts were saved", errors)
+        self.assertIn("remains in INTAKE", errors)
+        self.assertIn("Retry in the same job", errors)
+        self.assertEqual(orchestrator.get_job(job["id"], db_path)["state"], "INTAKE")
+        self.assertEqual(orchestrator.list_checkpoints(job["id"], db_path), [])
+
     def test_review_mode_keeps_agent_run_path_without_create_planning(self):
         script = self._app_script(self.root)
         isolated_data = self.root / "isolated-data"

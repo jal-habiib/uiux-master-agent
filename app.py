@@ -10,9 +10,12 @@ import streamlit.components.v1 as components
 
 from agent import run
 import app_jobs
+import build
 import design
+import gate
 import job_store
 import planning
+import verify
 
 HISTORY_PATH = Path(__file__).parent / "data" / "chat_history.json"
 
@@ -117,8 +120,8 @@ if active_job:
 else:
     st.sidebar.info("No active job. One will be created when you submit a prompt.")
 st.sidebar.caption(
-    "S8 status: Create intake, UX planning, and Design are connected. "
-    "Build, Verify, and delivery workers are not connected yet."
+    "S11 status: Create intake, UX planning, Design, Build, Verify, and Gate & Deliver are connected. "
+    "Refine remains a bounded manual handoff; production deployment is not automated."
 )
 
 uploaded_images = st.sidebar.file_uploader(
@@ -186,7 +189,7 @@ if active_job and active_job["mode"] == "create":
                 if design_saved:
                     st.rerun()
 
-    if active_job["state"] == "DESIGN":
+    if active_job["state"] in {"DESIGN", "BUILD"}:
         saved_design = app_jobs.saved_design_artifacts(active_job)
         if not saved_design or set(saved_design) != app_jobs.DESIGN_ARTIFACT_NAMES:
             st.error("The completed Design artifacts are missing or invalid.")
@@ -224,6 +227,193 @@ if active_job and active_job["mode"] == "create":
                     for reference in active_job["latest_checkpoint"]["artifact_refs"]
                 )
             )
+
+    if active_job["state"] == "DESIGN":
+        try:
+            build_inputs = build.load_build_inputs(active_job["id"])
+        except job_store.ValidationError as exc:
+            build_inputs = None
+            st.error(f"Build is unavailable because its source artifacts failed validation: {exc}")
+        if build_inputs:
+            st.info("The validated S7 brief, UX Plan, and completed S8 Design are ready to build.")
+            questions = app_jobs.saved_build_clarification_questions(active_job)
+            if questions:
+                st.warning("Build needs clarification before it can continue.")
+                for question in questions:
+                    st.markdown(f"- {question}")
+                build_clarification = st.text_area(
+                    "Your Build clarification",
+                    key=f"build_clarification_{active_job['id']}",
+                    max_chars=build.MAX_STRING_CHARS,
+                )
+            else:
+                build_clarification = None
+            if st.button(
+                "Generate HTML build",
+                key=f"generate_build_{active_job['id']}",
+                type="primary",
+            ):
+                if questions and not (build_clarification or "").strip():
+                    st.error("Answer the saved Build questions before continuing.")
+                else:
+                    build_saved = False
+                    try:
+                        with st.status("Generating HTML pages...", expanded=True) as status:
+                            build.build_job(
+                                active_job["id"],
+                                clarification=build_clarification,
+                            )
+                            status.update(label="Build stage saved", state="complete")
+                        build_saved = True
+                    except Exception as exc:
+                        st.error(f"Unable to generate the HTML build: {exc}")
+                    if build_saved:
+                        st.rerun()
+
+    if active_job["state"] == "BUILD":
+        try:
+            saved_build = build.load_completed_build(active_job)
+        except job_store.ValidationError as exc:
+            saved_build = None
+            st.error(f"The saved Build artifacts are invalid: {exc}")
+        if not saved_build:
+            st.error("The completed Build manifest or page artifacts are missing.")
+        else:
+            manifest = saved_build["manifest"]
+            st.subheader("Saved HTML build")
+            st.caption(
+                "Immutable Build artifacts: "
+                + ", ".join(active_job["latest_checkpoint"]["artifact_refs"])
+            )
+            for page in saved_build["pages"]:
+                with st.expander(f"{page['page']} · {page['filename']}", expanded=True):
+                    st.code(page["html"], language="html")
+                    components.html(page["html"], height=700, scrolling=True)
+            with st.expander("Build manifest"):
+                st.json(manifest)
+
+    if active_job["state"] in {"BUILD", "VERIFY"}:
+        try:
+            saved_verification = verify.load_saved_verification(active_job)
+        except job_store.ValidationError as exc:
+            saved_verification = None
+            st.error(f"The saved Verify report is invalid: {exc}")
+        if saved_verification:
+            st.subheader("Saved Verify report")
+            st.markdown(f"**Status: {saved_verification['status']}**")
+            if not saved_verification["verified"]:
+                st.warning(
+                    "This report does not verify the build. Failed gates or checks that "
+                    "did not run remain visible and cannot be treated as passing."
+                )
+            st.json(saved_verification["hard_gates"])
+            with st.expander("Quality score and supplemental provider review"):
+                st.json(saved_verification["soft_quality"])
+                st.json(saved_verification["provider_review"])
+            st.caption(
+                "Immutable Verify artifact: "
+                + ", ".join(
+                    reference
+                    for item in active_job.get("checkpoints", [])
+                    if item.get("metadata", {}).get("integration") == verify.VERIFY_INTEGRATION
+                    for reference in item.get("artifact_refs", [])
+                )
+            )
+
+    if active_job["state"] == "BUILD":
+        st.info("Verify checks the saved S9 manifest and pages; it does not regenerate them.")
+        flows_json = st.text_area(
+            "Required browser user flows (JSON)",
+            key=f"verify_flows_{active_job['id']}",
+            max_chars=64 * 1024,
+            help=(
+                "Provide the safe flow schema used by browser QA. Without flow evidence, "
+                "the result remains NEEDS_INPUT; no flow is inferred or fabricated."
+            ),
+        )
+        if st.button(
+            "Verify saved HTML build",
+            key=f"verify_build_{active_job['id']}",
+            type="primary",
+        ):
+            try:
+                with st.status("Verifying saved HTML pages...", expanded=True) as status:
+                    result = verify.verify_job(
+                        active_job["id"],
+                        flows_json=flows_json or None,
+                    )
+                    status.update(
+                        label=f"Verify status: {result['report']['status']}",
+                        state="complete",
+                    )
+                st.rerun()
+            except job_store.ValidationError as exc:
+                st.error(f"Unable to verify this Build: {exc}")
+
+if active_job and active_job["mode"] == "create" and active_job["state"] in {"VERIFY", "GATE_AND_DELIVER", "DELIVERED"}:
+    try:
+        saved_gate = gate.load_saved_gate(active_job)
+    except job_store.ValidationError as exc:
+        saved_gate = None
+        st.error(f"The saved Gate report or delivery package is invalid: {exc}")
+
+    if saved_gate:
+        gate_report = saved_gate["report"]
+        st.subheader("Gate & Deliver")
+        st.markdown(f"**Gate status: {gate_report['status']}**")
+        st.write(gate_report["reason"])
+        if gate_report["status"] == "BLOCKED":
+            st.warning("Delivery is blocked. Unverified checks are not passes, and failed checks require refinement.")
+            if gate_report["failed_gates"]:
+                st.markdown("**Failed checks**")
+                for item in gate_report["failed_gates"]:
+                    st.markdown(f"- {item}")
+            if gate_report["not_verified_gates"]:
+                st.markdown("**Not verified**")
+                for item in gate_report["not_verified_gates"]:
+                    st.markdown(f"- {item}")
+        elif gate_report["status"] == "NOT_PASSED":
+            st.warning("This package is explicitly NOT PASSED after three fix cycles. It is not a production-readiness claim.")
+        elif gate_report["status"] == "PASS":
+            st.success("All hard gates and the soft quality threshold passed.")
+        if saved_gate["package_bytes"]:
+            st.download_button(
+                "Download delivery package",
+                data=saved_gate["package_bytes"],
+                file_name=f"uiux-delivery-{active_job['id'][:8]}.zip",
+                mime="application/zip",
+                key=f"download_delivery_{active_job['id']}",
+            )
+    elif active_job["state"] == "VERIFY":
+        st.info("Run the code-enforced gate against the saved Verify report. Passing builds are packaged locally; failed builds remain blocked.")
+
+    if active_job["state"] == "VERIFY":
+        if st.button("Evaluate Gate & create delivery package", key=f"gate_job_{active_job['id']}", type="primary"):
+            try:
+                with st.status("Evaluating hard gates and preparing delivery...", expanded=True) as status:
+                    gate_result = gate.gate_job(active_job["id"])
+                    active_job = gate_result["job"]
+                    status.update(label=f"Gate status: {gate_result['status']}", state="complete")
+                if gate_result["status"] == "BLOCKED":
+                    st.warning(gate_result["report"]["reason"])
+                elif gate_result["status"] == "NOT_PASSED":
+                    st.warning("A not-passed package was created after three recorded fix cycles.")
+                else:
+                    st.success("Gate passed. Delivery package created.")
+                st.rerun()
+            except job_store.ValidationError as exc:
+                st.error(f"Unable to complete Gate & Deliver: {exc}")
+
+    if active_job["state"] == "GATE_AND_DELIVER":
+        st.warning("The delivery package and Gate checkpoint are saved. Finalize the state transition to complete delivery.")
+        if st.button("Finalize saved delivery", key=f"finalize_delivery_{active_job['id']}", type="primary"):
+            try:
+                result = gate.finalize_delivery(active_job["id"])
+                active_job = result["job"]
+                st.success("Delivery finalized.")
+                st.rerun()
+            except job_store.ValidationError as exc:
+                st.error(f"Unable to finalize delivery: {exc}")
 
 if prompt := st.chat_input("Ask the UI/UX Master Agent..."):
     status = None
@@ -327,6 +517,21 @@ if prompt := st.chat_input("Ask the UI/UX Master Agent..."):
                 }
             )
             save_history(st.session_state.messages)
+    except planning.PlanningResponseError as exc:
+        response = (
+            "The Create intake response did not match the required S7 JSON contract. "
+            f"Details: {exc}. No plan artifacts were saved and this job remains in INTAKE. "
+            "Retry in the same job; if the issue continues, add clarification to your brief."
+        )
+        if status is not None:
+            status.update(label="Intake response needs correction", state="error")
+        with st.chat_message("assistant"):
+            st.error(response)
+        error_message = {"role": "assistant", "content": response}
+        if active_job is not None:
+            error_message["job_id"] = active_job["id"]
+        st.session_state.messages.append(error_message)
+        save_history(st.session_state.messages)
     except Exception as exc:
         response = f"Unable to get a response: {exc}"
         if status is not None:

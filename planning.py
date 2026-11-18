@@ -47,6 +47,10 @@ class PlanningError(job_store.ValidationError):
     """Raised when planning cannot produce a persisted valid result."""
 
 
+class PlanningResponseError(PlanningError):
+    """Raised when a provider response violates the intake response contract."""
+
+
 def _object(value: Any, fields: tuple[str, ...], name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise PlanningError(f"{name} must be an object")
@@ -159,14 +163,17 @@ def _response_json(response: Any) -> dict[str, Any]:
     content = getattr(getattr(response, "choices", [None])[0], "message", None)
     content = getattr(content, "content", None)
     if not isinstance(content, str) or not content.strip():
-        raise PlanningError("planning provider returned no JSON content")
+        raise PlanningResponseError("planning provider returned no JSON content")
     if len(content.encode("utf-8")) > MAX_RESPONSE_BYTES:
-        raise PlanningError("planning provider response exceeds 64 KB")
+        raise PlanningResponseError("planning provider response exceeds 64 KB")
     try:
         value = json.loads(content)
     except json.JSONDecodeError as exc:
-        raise PlanningError("planning provider returned malformed JSON") from exc
-    return validate_envelope(value)
+        raise PlanningResponseError("planning provider returned malformed JSON") from exc
+    try:
+        return validate_envelope(value)
+    except PlanningError as exc:
+        raise PlanningResponseError(str(exc)) from exc
 
 
 def _user_context(messages: list[dict[str, Any]], job_id: str) -> str:

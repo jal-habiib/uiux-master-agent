@@ -20,6 +20,7 @@ data/chat_history.json
 data/jobs.sqlite3
 data/jobs.sqlite3-wal
 data/jobs.sqlite3-shm
+data/job_artifacts/
 node_modules/
 
 # Streamlit

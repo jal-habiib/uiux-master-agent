@@ -71,8 +71,18 @@ def _validate_target(job: dict[str, Any], to_state: str, metadata: dict[str, Any
     if to_state == "CANCELLED":
         return None
     if to_state == "DELIVERED":
-        if current != "GATE_AND_DELIVER" or metadata.get("gate_status") != "PASS":
-            raise job_store.ValidationError("DELIVERED requires GATE_AND_DELIVER and gate_status='PASS'")
+        passed = metadata.get("gate_status") == "PASS"
+        not_passed_after_limit = (
+            metadata.get("gate_status") == "NOT_PASSED_AFTER_3_CYCLES"
+            and metadata.get("status") == "NOT_PASSED"
+            and isinstance(metadata.get("fix_cycles"), int)
+            and not isinstance(metadata.get("fix_cycles"), bool)
+            and metadata["fix_cycles"] >= 3
+        )
+        if current != "GATE_AND_DELIVER" or not (passed or not_passed_after_limit):
+            raise job_store.ValidationError(
+                "DELIVERED requires GATE_AND_DELIVER and a passing gate or an explicit not-passed report after three fix cycles"
+            )
     if current in CONTROL_STATES:
         if to_state != job["resume_state"]:
             raise job_store.ValidationError(

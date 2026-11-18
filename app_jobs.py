@@ -21,8 +21,11 @@ PLANNING_ARTIFACT_NAMES = frozenset({"product_brief.json", "ux_plan.json"})
 DESIGN_ARTIFACT_NAMES = frozenset({"design_spec.json", "design_tokens.json"})
 BUILD_MANIFEST_NAME = "build_manifest.json"
 BUILD_INTEGRATION = "s9-build"
+VERIFY_REPORT_NAME = "verify_report.json"
+VERIFY_INTEGRATION = "s10-verify"
 MAX_BUILD_PAGE_BYTES = 256 * 1024
 MAX_BUILD_TOTAL_BYTES = 1024 * 1024
+MAX_VERIFY_REPORT_BYTES = 1024 * 1024
 _BUILD_FILENAME = re.compile(r"[a-z0-9](?:[a-z0-9_-]{0,98}[a-z0-9])?\.html\Z")
 
 
@@ -83,7 +86,7 @@ def list_recoverable_ui_jobs(
     return [
         job
         for job in orchestrator.list_recoverable_jobs(db_path)
-        if job["state"] in {"INTAKE", "PLANNING", "DESIGN", "BUILD"}
+        if job["state"] in {"INTAKE", "PLANNING", "DESIGN", "BUILD", "VERIFY", "GATE_AND_DELIVER"}
     ]
 
 
@@ -108,10 +111,10 @@ def resume_ui_job(
     if not _db_path(db_path).exists():
         raise job_store.JobNotFoundError(f"job {job_id!r} was not found")
     job = orchestrator.get_job(job_id, db_path)
-    if job["state"] not in {"INTAKE", "PLANNING", "DESIGN", "BUILD"}:
+    if job["state"] not in {"INTAKE", "PLANNING", "DESIGN", "BUILD", "VERIFY", "GATE_AND_DELIVER", "DELIVERED"}:
         raise job_store.ValidationError(
             f"job {job_id!r} cannot resume from state {job['state']!r}; "
-            "expected 'INTAKE', 'PLANNING', 'DESIGN', or 'BUILD'"
+            "expected an enabled Create stage or DELIVERED"
         )
     checkpoints = orchestrator.list_checkpoints(job_id, db_path)
     job["latest_checkpoint"] = checkpoints[-1] if checkpoints else None
@@ -133,6 +136,7 @@ def _saved_artifacts(
     allowed_names: frozenset[str],
     label: str,
     artifact_root: str | Path | None,
+    max_bytes: int = MAX_ARTIFACT_BYTES,
 ) -> dict[str, Any] | None:
     if not checkpoint:
         return None
@@ -219,8 +223,8 @@ def _saved_artifacts(
             raise job_store.ValidationError(f"{label} artifact file does not exist") from exc
         if not resolved_candidate.is_file():
             raise job_store.ValidationError(f"{label} artifact must be a regular file")
-        if resolved_candidate.stat().st_size > MAX_ARTIFACT_BYTES:
-            raise job_store.ValidationError(f"{label} artifact exceeds 64 KB")
+        if resolved_candidate.stat().st_size > max_bytes:
+            raise job_store.ValidationError(f"{label} artifact exceeds its size limit")
         try:
             with resolved_candidate.open("r", encoding="utf-8") as stream:
                 values[name] = json.load(stream)
@@ -228,6 +232,42 @@ def _saved_artifacts(
             raise job_store.ValidationError(f"{label} artifact contains malformed JSON") from exc
     if not values:
         return None
+    return values
+
+
+def saved_verify_artifacts(
+    job: dict[str, Any], artifact_root: str | Path | None = None
+) -> dict[str, Any] | None:
+    """Load this job's latest S10 report from its recorded checkpoint only."""
+    checkpoint = next(
+        (
+            item for item in reversed(_checkpoint_history(job))
+            if item.get("stage") == "BUILD"
+            and item.get("metadata", {}).get("integration") == VERIFY_INTEGRATION
+        ),
+        None,
+    )
+    if checkpoint is None:
+        return None
+    metadata = checkpoint.get("metadata", {})
+    references = checkpoint.get("artifact_refs")
+    if (
+        not isinstance(references, list)
+        or len(references) != 1
+        or metadata.get("artifact_refs") != references
+        or metadata.get("status") not in {"PASS", "FAIL", "NEEDS_INPUT"}
+    ):
+        raise job_store.ValidationError("Verify checkpoint references are malformed")
+    values = _saved_artifacts(
+        job,
+        checkpoint,
+        frozenset({VERIFY_REPORT_NAME}),
+        "Verify",
+        artifact_root,
+        max_bytes=MAX_VERIFY_REPORT_BYTES,
+    )
+    if values is not None and set(values) != {VERIFY_REPORT_NAME}:
+        raise job_store.ValidationError("Verify checkpoint must reference one report")
     return values
 
 
@@ -430,7 +470,8 @@ def saved_build_artifacts(
         raise job_store.ValidationError("Build checkpoint must reference a manifest")
     manifest_file = parsed_refs[BUILD_MANIFEST_NAME][1]
     try:
-        if manifest_file.stat().st_size > 64 * 1024:
+        manifest_size = manifest_file.stat().st_size
+        if manifest_size > 64 * 1024:
             raise job_store.ValidationError("Build manifest exceeds 64 KB")
         manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -449,7 +490,7 @@ def saved_build_artifacts(
     filenames: set[str] = set()
     page_names: set[str] = set()
     html_values: dict[str, str] = {}
-    total_bytes = 0
+    total_bytes = manifest_size
     for page in pages:
         if (
             not isinstance(page, dict)
