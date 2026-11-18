@@ -18,6 +18,15 @@ def _validated_output_path(filename: object) -> tuple[str, Path]:
     return filename, path
 
 
+def _auto_review(filename: str) -> dict | None:
+    """Best-effort automatic post-save review; returns None if unavailable."""
+    try:
+        from tools.auto_review import review
+        return review(filename)
+    except Exception:
+        return None
+
+
 def edit_file(filename: str, search_string: str, replace_string: str) -> dict:
     """Replace an exact string in an existing output file."""
     try:
@@ -32,7 +41,11 @@ def edit_file(filename: str, search_string: str, replace_string: str) -> dict:
             content.replace(search_string, replace_string),
             encoding="utf-8",
         )
-        return {"edited": True, "filename": safe_filename, "path": str(path)}
+        result = {"edited": True, "filename": safe_filename, "path": str(path)}
+        review = _auto_review(safe_filename)
+        if review is not None:
+            result["review"] = review
+        return result
     except FileNotFoundError:
         return {"error": f"File not found: {filename}"}
     except OSError as exc:

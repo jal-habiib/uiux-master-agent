@@ -13,6 +13,15 @@ def _available_files() -> list[str]:
         return []
 
 
+def _auto_review(filename: str) -> dict | None:
+    """Best-effort automatic post-save review; returns None if unavailable."""
+    try:
+        from tools.auto_review import review
+        return review(filename)
+    except Exception:
+        return None
+
+
 def save_file(filename: str, content: str) -> dict:
     try:
         if not isinstance(filename, str) or not _HTML_FILENAME.fullmatch(filename):
@@ -21,7 +30,7 @@ def save_file(filename: str, content: str) -> dict:
         # Ensure it has a .html extension
         if not filename.endswith(".html"):
             filename += ".html"
-            
+
         output_root = OUTPUT_DIR.resolve()
         path = output_root / filename
         if path.is_symlink() or path.resolve().parent != output_root:
@@ -43,7 +52,11 @@ def save_file(filename: str, content: str) -> dict:
                 version += 1
 
         path.write_text(content, encoding="utf-8")
-        return {"saved": True, "filename": filename, "path": str(path)}
+        result = {"saved": True, "filename": filename, "path": str(path)}
+        review = _auto_review(filename)
+        if review is not None:
+            result["review"] = review
+        return result
     except Exception as e:
         return {
             "error": f"Unable to save file '{filename}': {e}",

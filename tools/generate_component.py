@@ -27,6 +27,15 @@ def _component_output_path(name: object) -> Path:
     return destination
 
 
+def _auto_review(filename: str) -> dict | None:
+    """Best-effort automatic post-save review; returns None if unavailable."""
+    try:
+        from tools.auto_review import review
+        return review(filename)
+    except Exception:
+        return None
+
+
 def generate_component(spec: dict | str, target: str = "html-tailwind") -> dict:
     try:
         if isinstance(spec, str):
@@ -42,6 +51,10 @@ def generate_component(spec: dict | str, target: str = "html-tailwind") -> dict:
         path = _component_output_path(name)
         path.write_text(code, encoding="utf-8")
 
-        return {"target": target, "saved_to": str(path), "code": code}
+        result = {"target": target, "saved_to": str(path), "code": code}
+        review = _auto_review(f"{name}.html")
+        if review is not None:
+            result["review"] = review
+        return result
     except Exception as e:
         return {"error": f"Failed to generate component: {e}"}

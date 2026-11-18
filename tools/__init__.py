@@ -1,35 +1,20 @@
-from .analyze_image import analyze_image
-from .check_contrast import check_contrast
-from .lookup_pattern import lookup_pattern
 from .generate_component import generate_component
 from .save_file import save_file
 from .edit_file import edit_file
-from .read_notes import read_notes
-from .read_brand import read_brand
-from .screenshot_html import screenshot_html
-from .semantic_memory import save_memory, search_memory
-from .critic import critique_code
+from .read_file import read_file
+from .design_kit import design_kit
+from .memory import memory
+from .analyze_reference import analyze_reference
 from .verify_html import verify_html
 
 TOOLS = {
-    "analyze_image": {
-        "fn": analyze_image,
-        "desc": (
-            "Describe a user-uploaded PNG or JPEG screenshot in structured detail "
-            "(layout, colors, components, issues). The file must be under temp_uploads "
-            "and no larger than 15 MB."
-        ),
-        "params": {
-            "image_path": {
-                "type": "string",
-                "desc": "User-uploaded PNG/JPEG path under temp_uploads, maximum 15 MB.",
-            }
-        },
-        "required": ["image_path"],
-    },
     "save_file": {
         "fn": save_file,
-        "desc": "Save raw HTML/CSS code directly to a file in the output folder.",
+        "desc": (
+            "Save raw HTML/CSS code directly to a file in the output folder. "
+            "Returns an automatic review block (soft score, hard-gate status, "
+            "failing gates, generic-lint findings, ranked fixes)."
+        ),
         "params": {
             "filename": {"type": "string", "desc": "The name of the file (e.g., 'pricing-card.html')"},
             "content": {"type": "string", "desc": "The raw HTML code to save"},
@@ -38,7 +23,10 @@ TOOLS = {
     },
     "edit_file": {
         "fn": edit_file,
-        "desc": "Replace an exact string in an existing file in the output folder.",
+        "desc": (
+            "Replace an exact string in an existing file in the output folder. "
+            "Returns an automatic review block like save_file."
+        ),
         "params": {
             "filename": {
                 "type": "string",
@@ -55,86 +43,75 @@ TOOLS = {
         },
         "required": ["filename", "search_string", "replace_string"],
     },
-    "check_contrast": {
-        "fn": check_contrast,
-        "desc": "Compute WCAG contrast ratio between two hex colors. Returns ratio and pass/fail for AA and AAA.",
+    "read_file": {
+        "fn": read_file,
+        "desc": (
+            "Read a file inside output/, data/, or prompts/, or list available "
+            "files when called with no path (or path 'list')."
+        ),
         "params": {
-            "fg": {"type": "string", "desc": "Foreground hex, e.g. #1A1A1A"},
-            "bg": {"type": "string", "desc": "Background hex, e.g. #FDF6EC"},
+            "path": {
+                "type": "string",
+                "desc": "Optional file path relative to output/, data/, or prompts/. Omit or pass 'list' to list files.",
+            }
         },
-        "required": ["fg", "bg"],
-    },
-    "lookup_pattern": {
-        "fn": lookup_pattern,
-        "desc": "Fetch a known design pattern spec by name (e.g. 'pricing-card', 'empty-state', 'data-table').",
-        "params": {"name": {"type": "string", "desc": "Pattern name in kebab-case"}},
-        "required": ["name"],
+        "required": [],
     },
     "generate_component": {
         "fn": generate_component,
-        "desc": "Render a component spec to code. target defaults to 'html-tailwind'.",
+        "desc": (
+            "Render a component spec to code. target defaults to 'html-tailwind'. "
+            "Returns an automatic review block like save_file."
+        ),
         "params": {
             "spec": {"type": "object", "desc": "Spec matching the schema in the system prompt"},
             "target": {"type": "string", "desc": "Renderer target, default 'html-tailwind'"},
         },
         "required": ["spec"],
     },
-    "read_notes": {
-        "fn": read_notes,
-        "desc": "Read saved design notes and preferences to recall past decisions.",
-        "params": {},
-        "required": [],
-    },
-    "read_brand": {
-        "fn": read_brand,
-        "desc": "Read the brand kit from data/brand.json, including required colors and fonts.",
-        "params": {},
-        "required": [],
-    },
-    "screenshot_html": {
-        "fn": screenshot_html,
-        "desc": "Takes a screenshot of a generated HTML file so you can visually review your own work.",
-        "params": {
-            "filename": {
-                "type": "string",
-                "desc": "The HTML filename in the output folder (e.g., 'sacco-pricing.html')",
-            }
-        },
-        "required": ["filename"],
-    },
-    "save_memory": {
-        "fn": save_memory,
-        "desc": "Save an important design decision, user preference, or completed project into long-term memory.",
-        "params": {
-            "text": {"type": "string", "desc": "The design memory to save"},
-        },
-        "required": ["text"],
-    },
-    "search_memory": {
-        "fn": search_memory,
-        "desc": "Search long-term memory to recall past design decisions, user color preferences, or past projects.",
-        "params": {
-            "query": {"type": "string", "desc": "The design memory search query"},
-        },
-        "required": ["query"],
-    },
-    "critique_code": {
-        "fn": critique_code,
+    "design_kit": {
+        "fn": design_kit,
         "desc": (
-            "Evaluate an HTML file with a static heuristic seven-dimension, "
-            "100-point soft-score rubric. Hard gates are not verified by this tool."
+            "Generate concrete, non-generic design choices. action is one of "
+            "'palette', 'extract_palette', 'font_pairing', 'direction', or "
+            "'sample_data'; options is an optional JSON object with the "
+            "action's arguments (e.g. {\"vibe\": \"warm\"})."
         ),
         "params": {
-            "html_path": {"type": "string", "desc": "Path to the HTML file to critique"},
+            "action": {"type": "string", "desc": "One of: palette, extract_palette, font_pairing, direction, sample_data."},
+            "options": {"type": "string", "desc": "Optional JSON object string with action-specific arguments."},
         },
-        "required": ["html_path"],
+        "required": ["action"],
+    },
+    "memory": {
+        "fn": memory,
+        "desc": (
+            "Bundled memory access. action is 'save' (save text to memory), "
+            "'search' (search memory), or 'notes' (read saved notes)."
+        ),
+        "params": {
+            "action": {"type": "string", "desc": "One of: save, search, notes."},
+            "text": {"type": "string", "desc": "Text to save (for 'save') or query (for 'search')."},
+        },
+        "required": ["action"],
+    },
+    "analyze_reference": {
+        "fn": analyze_reference,
+        "desc": (
+            "Analyze an uploaded reference image into a design-system summary "
+            "(vision description plus extracted hex palette)."
+        ),
+        "params": {
+            "image_path": {"type": "string", "desc": "User-uploaded PNG/JPEG path under temp_uploads."},
+        },
+        "required": ["image_path"],
     },
     "verify_html": {
         "fn": verify_html,
         "desc": (
             "Run Playwright and local axe-core hard-gate verification at 375, 768, "
             "and 1440px, then combine the result with the static soft score. "
-            "Unavailable checks remain NOT_VERIFIED."
+            "Unavailable checks remain NOT_VERIFIED. (Also runs automatically after save/edit.)"
         ),
         "params": {
             "filename": {
